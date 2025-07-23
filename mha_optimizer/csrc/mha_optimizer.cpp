@@ -1,7 +1,7 @@
 #include "packed_attention_kernel.cuh"
-#include "cutlass_helpers.cuh"
+#include <torch/torch.h>
 
-#define CHECK_CUDA(x) TORCH_CHECK(x.device().is_cuda(), #x " must be a CUDA tensor")
+#define CHECK_CUDA(x) TORCH_CHECK(x.is_cuda(), #x " must be a CUDA tensor")
 #define CHECK_CONTIGUOUS(x) TORCH_CHECK(x.is_contiguous(), #x " must be contiguous")
 #define CHECK_INPUT(x) CHECK_CUDA(x); CHECK_CONTIGUOUS(x)
 
@@ -23,16 +23,10 @@ torch::Tensor mha_forward_dispatch(
     const int head_size = hidden_size / num_heads;
     TORCH_CHECK(hidden_size % num_heads == 0, "hidden_size must be divisible by num_heads");
 
-    auto q_proj = torch::empty({total_tokens, hidden_size}, hidden_states.options());
-    auto k_proj = torch::empty({total_tokens, hidden_size}, hidden_states.options());
-    auto v_proj = torch::empty({total_tokens, hidden_size}, hidden_states.options());
-    
-    // Step 1: QKV Projection using CUTLASS
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(hidden_states.scalar_type(), "qkv_projection_cutlass", ([&] {
-        cutlass_gemm_bias<scalar_t>(q_proj, hidden_states, q_weight, q_bias);
-        cutlass_gemm_bias<scalar_t>(k_proj, hidden_states, k_weight, k_bias);
-        cutlass_gemm_bias<scalar_t>(v_proj, hidden_states, v_weight, v_bias);
-    }));
+    // Step 1: QKV Projection using PyTorch's native functions
+    auto q_proj = torch::addmm(q_bias, hidden_states, q_weight.t());
+    auto k_proj = torch::addmm(k_bias, hidden_states, k_weight.t());
+    auto v_proj = torch::addmm(v_bias, hidden_states, v_weight.t());
 
     auto q = q_proj.view({total_tokens, num_heads, head_size});
     auto k = k_proj.view({total_tokens, num_heads, head_size});
@@ -46,15 +40,12 @@ torch::Tensor mha_forward_dispatch(
 
     auto attn_output_reshaped = attn_output.view({total_tokens, hidden_size});
     
-    // Step 3: Output Projection using CUTLASS
-    auto final_output = torch::empty({total_tokens, hidden_size}, hidden_states.options());
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(hidden_states.scalar_type(), "out_projection_cutlass", ([&] {
-        cutlass_gemm_bias<scalar_t>(final_output, attn_output_reshaped, out_weight, out_bias);
-    }));
+    // Step 3: Output Projection using PyTorch's native functions
+    auto final_output = torch::addmm(out_bias, attn_output_reshaped, out_weight.t());
 
     return final_output;
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("forward", &mha_forward_dispatch, "Optimized MHA Forward (CUTLASS + Custom Kernel)");
+    m.def("forward", &mha_forward_dispatch, "Optimized MHA Forward (PyTorch GEMM + Custom Kernel)");
 }
