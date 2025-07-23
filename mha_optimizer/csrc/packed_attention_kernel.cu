@@ -143,3 +143,4 @@ template void packed_attention_cuda<float>(
     torch::Tensor&, const torch::Tensor&, const torch::Tensor&, const torch::Tensor&, const torch::Tensor&);
 template void packed_attention_cuda<at::Half>(
     torch::Tensor&, const torch::Tensor&, const torch::Tensor&, const torch::Tensor&, const torch::Tensor&);
+template void packed_attention_cuda<double>(torch::Tensor&, const torch::Tensor&, const torch::Tensor&, const torch::Tensor&, const torch::Tensor&);
